@@ -1,117 +1,70 @@
 import { Task, TaskExecution } from '../types';
+import { API_BASE_URL } from '../config';
 
-const STORAGE_KEY = 'kaiburr_tasks';
-
-const getInitialTasks = (): Task[] => [
-    {
-        id: "123",
-        name: "Print Hello",
-        owner: "John Smith",
-        command: "echo Hello World again!",
-        taskExecutions: [
-            {
-                startTime: "2023-04-21T15:51:42.276Z",
-                endTime: "2023-04-21T15:51:43.276Z",
-                output: "Hello World!"
-            },
-            {
-                startTime: "2023-04-21T15:52:42.276Z",
-                endTime: "2023-04-21T15:52:43.276Z",
-                output: "Hello World again!"
-            }
-        ]
-    },
-    {
-        id: "124",
-        name: "List Files",
-        owner: "Jane Doe",
-        command: "ls -la",
-        taskExecutions: []
-    },
-    {
-        id: "125",
-        name: "Check System Date",
-        owner: "Admin",
-        command: "date",
-        taskExecutions: []
+/**
+ * A helper function to handle API responses, check for errors, and parse JSON.
+ * @param response - The Fetch API Response object.
+ * @returns The parsed JSON data.
+ * @throws An error if the response is not OK.
+ */
+async function handleResponse<T>(response: Response): Promise<T> {
+    if (!response.ok) {
+        const errorText = await response.text().catch(() => 'Could not read error text.');
+        throw new Error(`API Error: ${response.status} ${response.statusText} - ${errorText}`);
     }
-];
-
-const getTasksFromStorage = (): Task[] => {
-    try {
-        const storedTasks = localStorage.getItem(STORAGE_KEY);
-        if (storedTasks) {
-            return JSON.parse(storedTasks);
-        } else {
-            const initialTasks = getInitialTasks();
-            localStorage.setItem(STORAGE_KEY, JSON.stringify(initialTasks));
-            return initialTasks;
-        }
-    } catch (error) {
-        console.error("Could not access local storage:", error);
-        return getInitialTasks();
+    // Handle responses that might not have a body (e.g., 204 No Content)
+    const contentType = response.headers.get('content-type');
+    if (contentType && contentType.includes('application/json')) {
+        return response.json() as Promise<T>;
     }
-};
-
-const saveTasksToStorage = (tasks: Task[]) => {
-    try {
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(tasks));
-    } catch (error) {
-        console.error("Could not save to local storage:", error);
-    }
-};
-
-const simulateDelay = <T,>(data: T): Promise<T> => {
-    return new Promise(resolve => setTimeout(() => resolve(data), 500));
+    // @ts-ignore
+    return Promise.resolve();
 }
 
 export const taskService = {
+    /**
+     * Fetches all tasks from the backend.
+     */
     getTasks: async (): Promise<Task[]> => {
-        const tasks = getTasksFromStorage();
-        return simulateDelay(tasks);
+        const response = await fetch(`${API_BASE_URL}/tasks`);
+        return handleResponse<Task[]>(response);
     },
 
+    /**
+     * Creates a new task on the backend.
+     * @param taskData - The data for the new task.
+     */
     createTask: async (taskData: Omit<Task, 'id' | 'taskExecutions'>): Promise<Task> => {
-        const tasks = getTasksFromStorage();
-        const newTask: Task = {
-            ...taskData,
-            id: new Date().getTime().toString(),
-            taskExecutions: [],
-        };
-        const updatedTasks = [...tasks, newTask];
-        saveTasksToStorage(updatedTasks);
-        return simulateDelay(newTask);
+        const response = await fetch(`${API_BASE_URL}/tasks`, {
+            method: 'PUT',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify(taskData),
+        });
+        return handleResponse<Task>(response);
     },
 
-    deleteTask: async (taskId: string): Promise<Task[]> => {
-        let tasks = getTasksFromStorage();
-        const updatedTasks = tasks.filter(task => task.id !== taskId);
-        saveTasksToStorage(updatedTasks);
-        return simulateDelay(updatedTasks);
+    /**
+     * Deletes a task from the backend.
+     * @param taskId - The ID of the task to delete.
+     */
+    deleteTask: async (taskId: string): Promise<void> => {
+        const response = await fetch(`${API_BASE_URL}/tasks/${taskId}`, {
+            method: 'DELETE',
+        });
+        await handleResponse<void>(response);
     },
 
-    runTaskExecution: async (taskId: string): Promise<TaskExecution> => {
-        const tasks = getTasksFromStorage();
-        const taskIndex = tasks.findIndex(task => task.id === taskId);
-
-        if (taskIndex === -1) {
-            throw new Error('Task not found');
-        }
-
-        const startTime = new Date();
-        // Simulate a short execution time
-        await new Promise(res => setTimeout(res, Math.random() * 1000 + 500));
-        const endTime = new Date();
-        
-        const newExecution: TaskExecution = {
-            startTime: startTime.toISOString(),
-            endTime: endTime.toISOString(),
-            output: `Simulated output for command "${tasks[taskIndex].command}" at ${startTime.toLocaleTimeString()}`,
-        };
-
-        tasks[taskIndex].taskExecutions.push(newExecution);
-        saveTasksToStorage(tasks);
-        
-        return simulateDelay(newExecution);
+    /**
+     * Executes a task and returns the updated task with the new execution record.
+     * @param taskId - The ID of the task to run.
+     * @returns The updated task object.
+     */
+    runTaskExecution: async (taskId: string): Promise<Task> => {
+        const response = await fetch(`${API_BASE_URL}/tasks/${taskId}/execute`, {
+            method: 'PUT',
+        });
+        return handleResponse<Task>(response);
     },
 };

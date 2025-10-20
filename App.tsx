@@ -31,7 +31,8 @@ const App: React.FC = () => {
             setTasks(fetchedTasks);
             setError(null);
         } catch (err) {
-            setError('Failed to fetch tasks.');
+            const errorMessage = err instanceof Error ? err.message : 'An unknown error occurred.';
+            setError(`Failed to fetch tasks: ${errorMessage}`);
             console.error(err);
         } finally {
             setIsLoading(false);
@@ -46,9 +47,10 @@ const App: React.FC = () => {
         try {
             await taskService.createTask(taskData);
             setCreateModalOpen(false);
-            await fetchTasks();
+            await fetchTasks(); // Refetch all tasks to get the latest list
         } catch (err) {
-            setError('Failed to create task.');
+            const errorMessage = err instanceof Error ? err.message : 'An unknown error occurred.';
+            setError(`Failed to create task: ${errorMessage}`);
             console.error(err);
         }
     };
@@ -65,10 +67,12 @@ const App: React.FC = () => {
         setTaskToDelete(null); // Close modal immediately for better UX
 
         try {
-            const updatedTasks = await taskService.deleteTask(taskId);
-            setTasks(updatedTasks);
+            await taskService.deleteTask(taskId);
+            // Remove task from state locally for immediate UI update
+            setTasks(currentTasks => currentTasks.filter(task => task.id !== taskId));
         } catch (err) {
-            setError('Failed to delete task.');
+            const errorMessage = err instanceof Error ? err.message : 'An unknown error occurred.';
+            setError(`Failed to delete task: ${errorMessage}`);
             console.error(err);
         } finally {
             setDeletingTasks(prev => {
@@ -82,24 +86,26 @@ const App: React.FC = () => {
     const handleRunTask = async (taskId: string) => {
         setRunningTasks(prev => new Set(prev).add(taskId));
         try {
-            const newExecution = await taskService.runTaskExecution(taskId);
-            const task = tasks.find(t => t.id === taskId);
+            const updatedTask = await taskService.runTaskExecution(taskId);
             
-            // Update tasks state locally for immediate feedback
+            // Update tasks state with the returned updated task
             setTasks(currentTasks => 
                 currentTasks.map(t => 
                     t.id === taskId 
-                        ? { ...t, taskExecutions: [...t.taskExecutions, newExecution] }
+                        ? updatedTask
                         : t
                 )
             );
             
-            if (task) {
-                // Show the result modal
-                setExecutionResult({ task, execution: newExecution });
+            // Find the newest execution to display in the result modal
+            const newExecution = updatedTask.taskExecutions?.[updatedTask.taskExecutions.length - 1];
+            
+            if (newExecution) {
+                setExecutionResult({ task: updatedTask, execution: newExecution });
             }
         } catch (err) {
-            setError('Failed to run task.');
+            const errorMessage = err instanceof Error ? err.message : 'An unknown error occurred.';
+            setError(`Failed to run task: ${errorMessage}`);
             console.error(err);
         } finally {
             setRunningTasks(prev => {
@@ -121,7 +127,7 @@ const App: React.FC = () => {
         }
         return tasks.filter(task =>
             task.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-            task.owner.toLowerCase().includes(searchTerm.toLowerCase())
+            (task.owner && task.owner.toLowerCase().includes(searchTerm.toLowerCase()))
         );
     }, [tasks, searchTerm]);
     
@@ -154,8 +160,12 @@ const App: React.FC = () => {
                         <p className="text-lg">Loading tasks...</p>
                     </div>
                 ) : error ? (
-                    <div className="text-center py-10 text-red-400">
-                        <p className="text-lg">{error}</p>
+                    <div className="text-center py-10 text-red-400 bg-red-900/20 rounded-lg p-4">
+                        <p className="text-lg font-semibold">An Error Occurred</p>
+                        <p className="text-sm">{error}</p>
+                        <button onClick={fetchTasks} className="mt-4 bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded-md">
+                            Try Again
+                        </button>
                     </div>
                 ) : filteredTasks.length > 0 ? (
                     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
